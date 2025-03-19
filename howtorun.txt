@@ -1,0 +1,7 @@
+First, run: npm install
+
+Next, run: npm run dev
+
+If any errors occur, copy and paste them here—I’ll guide you on the necessary installations to fix them.
+
+Once resolved, run: npm run dev again.

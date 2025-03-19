@@ -7,6 +7,7 @@ from Tools.pdf_gen_tool import PDFCreationTool
 from Tools.search_tool import SearchTools
 from Tools.text_splitter_tool import TextSplitterTool
 from Tools.image_URL_extractor_tool import UnsplashAPITool
+from Tools.json_formatter_tool import JsonFormatterTool
 
 class CustomAgents:
     def __init__(self):
@@ -82,7 +83,8 @@ class CustomAgents:
         tools = [
  
             TextSplitterTool.split_text,
- 
+            JsonFormatterTool.format_json_to_text
+
         ]
         return Agent(
             role="Data Structuring Agent",

@@ -47,9 +47,14 @@ class CustomTasks:
     def structure_content_task(self, agent, text):
      return Task(
         description=dedent(f"""
-            Using the generated text:
+            Review the input content provided below. It might be structured text or raw JSON.
+            Input Content:
+            ------------
             {text}
-            Structure the content according to the user's preferred format, enabling the generation of a well-organized PDF document.
+            ------------
+            If the input content is JSON, use the JsonFormatterTool to convert it into well-formatted text.
+            If it's already text, ensure it is well-structured for a PDF document.
+            Structure the final text content according to the user's preferred format, enabling the generation of a well-organized PDF document.
             {self.__tip_section()}
             Ensure the structured content is readable, visually appealing, and follows the specified formatting guidelines.
         """),

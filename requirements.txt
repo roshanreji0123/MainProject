@@ -12,3 +12,7 @@ sympy
 fpdf==1.7.2 
 colorama
 Markdown
+serpapi
+requests
+Pillow
+Flask
