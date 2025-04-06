@@ -7,19 +7,34 @@ class CustomTasks:
     def __tip_section(self):
         return "If you do your BEST WORK, I'll give you a $10,000 commission!"
 
-    def generate_notes_task(self, agent, topic, preferences):
-        if preferences.lower() == 'large':
-            detail_level = "Generate an extensive and in-depth set of notes."
-        else:
-            detail_level = "Generate a concise set of notes."
-
+    def generate_notes_task(self, agent, topic, preference):
         return Task(
             description=dedent(f"""
-            Based on the given topic '{topic}' and generate larger or shorter content based on '{preferences}', {detail_level}
-            {self.__tip_section()}
-            Make sure to cover all aspects of the topic and present the information in a well-structured and visually appealing manner.
+                Generate comprehensive, well-structured notes on the given topic: '{topic}'.
+                Focus on clarity, accuracy, and detail, tailored to the preference: '{preference}'.
+                Consult multiple reliable web sources to gather information.
+                Structure the notes logically with clear headings (using '#' for main title, '##' for subheadings) and bullet points ('-' or '*') where appropriate.
+                Ensure the final output is coherent, informative, and ready for structuring and PDF generation.
+                Do not include any introductory or concluding remarks like "Here are the notes..." or "I hope this helps.". Just provide the structured text content.
+            """),
+            expected_output=dedent("""
+                Well-structured, detailed text content about the topic, formatted with markdown-style headings (#, ##) and bullet points (- or *).
+                Example:
+                # Main Title about Topic
+
+                ## Introduction
+                Some introductory text.
+
+                ## Key Concept 1
+                Explanation of the first key concept.
+                - Bullet point 1
+                - Bullet point 2
+
+                ## Key Concept 2
+                Explanation of the second key concept. Further details...
             """),
             agent=agent,
+            async_execution=False,
         )
     
     def gather_information_task(self, agent, topic):
@@ -64,12 +79,24 @@ class CustomTasks:
     def generate_pdf_task(self, agent, structured_content):
      return Task(
         description=dedent(f"""
-            Using the provided {structured_content}, structure the content in a way that would look good in a PDF document.
+            **Task:** Format the provided content for PDF generation using specific markers.
+
+            **Input Content:**
+            ------------
+            {structured_content}
+            ------------
+
+            **Formatting Rules (Apply these markers to the text):**
+            1.  **Main Title:** Start the main title line **exactly** with `# ` (Use only once).
+            2.  **Section Headings:** Start major section heading lines **exactly** with `## `.
+            3.  **Bullet Points:** Start bullet point lines **exactly** with `- ` or `* `.
+            4.  **Paragraphs:** Separate paragraphs with a blank line.
+            5.  **DO NOT USE:** `###` headings or inline bold (`**`).
+
+            **Output:** Return the fully formatted text using only the allowed markers (#, ##, -/*).
             {self.__tip_section()}
-            Ensure the structured content is visually appealing, readable, and follows best practices for PDF formatting and layout. The goal is to create a comprehensive representation of the information that can be easily shared and presented.
-            {self.__tip_section()}
-            Make sure the output atleast contains {structured_content} and is suitable for easy sharing and distribution, providing users with an efficient way to present their ideas and information.
         """),
         agent=agent,
-        
+        # Simplified expected output - focus on markers
+        expected_output="Well-structured text using only #, ##, -/* markers for formatting."
     )

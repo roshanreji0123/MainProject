@@ -17,33 +17,47 @@ COPY src ./src
 RUN npm run build
 
 # Stage 2: Setup the Python backend and copy built frontend
-FROM python:3.10
+FROM python:3.11-slim
 
-# Install OS dependencies (like xdg-utils if needed for PDF opening, though less relevant in container)
-# RUN apt-get update && apt-get install -y xdg-utils && rm -rf /var/lib/apt/lists/*
-# Keeping xdg-utils commented out as opening files directly isn't typical in server containers
+# Set environment variables to prevent caching issues with pip
+ENV PYTHONDONTWRITEBYTECODE=1
+ENV PYTHONUNBUFFERED=1
 
+# Set the working directory in the container
 WORKDIR /app
+
+# Install system dependencies required by some Python packages if necessary
+# Example: RUN apt-get update && apt-get install -y --no-install-recommends some-package && rm -rf /var/lib/apt/lists/*
+
+# Copy the requirements file into the container at /app
+COPY requirements.txt .
+
+# Install any needed packages specified in requirements.txt
+RUN pip install --no-cache-dir -r requirements.txt
+
+# Copy the rest of the application code into the container at /app
+# This includes main.py, agents.py, tasks.py, etc.
+COPY . .
+
+# Copy the necessary DejaVu font files into the /app directory
+COPY DejaVuSans.ttf /app/
+COPY DejaVuSans-Bold.ttf /app/
+COPY DejaVuSans-Oblique.ttf /app/
 
 # Create directories (pdf is also needed now)
 RUN mkdir -p /app/images && chmod 777 /app/images
 RUN mkdir -p /app/pdf && chmod 777 /app/pdf
 
-# Copy Python requirements and install dependencies
-COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
-
-# Copy the entire backend application code
-# Exclude frontend source and node_modules by using .dockerignore later if needed
-COPY . .
-
 # Copy the built frontend files from the builder stage
 COPY --from=builder /app/frontend/dist ./dist
 
-# Expose the port Flask will run on
+# Make port 5000 available to the world outside this container
 EXPOSE 5000
 
-# Run the Flask application
-# Use Gunicorn or Waitress for production instead of Flask development server
-# For now, run chmod on mounted dirs before starting Flask dev server:
-CMD ["sh", "-c", "chmod 777 /app/pdf /app/images && python main.py"]
+# Define environment variables if needed (though often passed at runtime)
+# Use key=value format for ENV
+# ENV SERPAPI_API_KEY=YOUR_SERPAPI_API_KEY_HERE
+# ENV OPENAI_API_KEY=YOUR_OPENAI_API_KEY_HERE
+
+# Run main.py when the container launches
+CMD ["python", "main.py"]

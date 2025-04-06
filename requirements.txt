@@ -1,5 +1,5 @@
 crewai==0.11.0
-langchain-community==0.0.14
+langchain-community
 python-dotenv
 google-search-results==2.1.0
 google-api-python-client==2.114.0
@@ -9,7 +9,7 @@ beautifulsoup4==4.12.3
 tavily-python==0.3.1
 langchain_google_genai
 sympy
-fpdf==1.7.2 
+fpdf2
 colorama
 Markdown
 serpapi

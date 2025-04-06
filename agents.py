@@ -8,25 +8,39 @@ from Tools.search_tool import SearchTools
 from Tools.text_splitter_tool import TextSplitterTool
 from Tools.image_URL_extractor_tool import UnsplashAPITool
 from Tools.json_formatter_tool import JsonFormatterTool
+import asyncio
+from dotenv import load_dotenv
+
+# Load environment variables
+load_dotenv()
 
 class CustomAgents:
     def __init__(self):
-        google_api_key = os.getenv("GOOGLE_API_KEY")
-        if not google_api_key:
-            raise ValueError("GOOGLE_API_KEY not found in environment variables")
-            
+        self.llm = None # Initialize as None
         try:
-            # Configure the Google Generative AI
-            genai.configure(api_key=google_api_key)
-            
+            # Ensure an event loop exists for LLM initialization
+            try:
+                loop = asyncio.get_running_loop()
+            except RuntimeError:  # No running event loop
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
+
+            # Use GOOGLE_API_KEY environment variable
+            google_api_key = os.getenv("GOOGLE_API_KEY")
+            if not google_api_key:
+                 raise ValueError("GOOGLE_API_KEY environment variable not set.")
+
+            # Now initialize the LLM within the context of an available loop
             self.llm = ChatGoogleGenerativeAI(
-                model="gemini-1.5-pro",  # Updated model name
-                google_api_key=google_api_key,
-                temperature=0.9,
-                convert_system_message_to_human=True
+                 model="gemini-1.5-flash",
+                 verbose=True,
+                 temperature=0.5,
+                 google_api_key=google_api_key,
             )
         except Exception as e:
-            raise Exception(f"Failed to initialize Gemini: {str(e)}")
+             # Log or print the error if helpful
+             print(f"Error during CustomAgents initialization: {e}")
+             raise Exception(f"Failed to initialize Gemini or agents: {str(e)}")
  
     def note_generation_agent(self):
         tools = [
