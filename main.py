@@ -13,11 +13,15 @@ from colorama import Fore, Style
 from PIL import Image
 import logging
 import json # Import json for potential agent output parsing
+import asyncio # Import asyncio
 
 load_dotenv()
-
+ 
 # Setup logging
-logging.basicConfig(level=logging.INFO)
+logging.basicConfig(
+    level=logging.DEBUG,  # Changed from INFO to DEBUG
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
 logger = logging.getLogger(__name__)
 
 # Create Flask app
@@ -26,63 +30,128 @@ logger = logging.getLogger(__name__)
 app = Flask(__name__, static_folder='dist', static_url_path='')
 
 def search_unsplash(query, num_images=1):
-    """Searches Google Images for the most relevant image/illustration and returns its filepath."""
-    image_filepaths = []
+    """Searches for images using both SerpAPI and Unsplash."""
+    validated_image_paths = []
     try:
-        # Refine search query slightly
-        search_term = f"{query} illustration diagram"
-        logger.info(f"Refined image search term: {search_term}")
-        params = {
-            "engine": "google_images",
-            "q": search_term, # Use refined search term
-            "api_key": os.environ["SERPAPI_API_KEY"],
-            "num": 5 # Ask for a few results to find the best single one
-        }
-        search = GoogleSearch(params)
-        results = search.get_dict()
+        # Try SerpAPI first
+        serpapi_key = os.environ.get("SERPAPI_API_KEY")
+        if serpapi_key:
+            logger.info("Attempting image search with SerpAPI...")
+            search_term = f"{query} illustration diagram"
+            params = {
+                "engine": "google_images",
+                "q": search_term,
+                "api_key": serpapi_key,
+                "num": 5
+            }
+            
+            search = GoogleSearch(params)
+            results = search.get_dict()
+            
+            if "error" in results:
+                logger.error(f"SerpAPI error: {results['error']}")
+            elif "images_results" in results and results["images_results"]:
+                logger.info(f"Found {len(results['images_results'])} images from SerpAPI")
+                validated_image_paths.extend(process_image_results(results["images_results"], query))
+        
+        # Try Unsplash as fallback
+        if not validated_image_paths:
+            logger.info("No images from SerpAPI, trying Unsplash...")
+            unsplash_key = os.environ.get("UNSPLASH_ACCESS_KEY")
+            if unsplash_key:
+                search_term = query.split(':')[0].strip()  # Use simpler search term for Unsplash
+                url = f"https://api.unsplash.com/search/photos"
+                headers = {"Authorization": f"Client-ID {unsplash_key}"}
+                params = {
+                    "query": search_term,
+                    "per_page": 5
+                }
+                
+                response = requests.get(url, headers=headers, params=params)
+                if response.status_code == 200:
+                    results = response.json()
+                    if results.get("results"):
+                        logger.info(f"Found {len(results['results'])} images from Unsplash")
+                        for photo in results["results"]:
+                            image_url = photo.get("urls", {}).get("regular")
+                            if image_url:
+                                validated_image_paths.extend(process_image_results([{"original": image_url}], query))
+                                break
 
-        if "images_results" not in results or not results["images_results"]:
-            logger.warning("No images found for the given query.")
-            return image_filepaths
+        if not validated_image_paths:
+            logger.warning("No images found from either API")
+            
+    except Exception as e:
+        logger.error(f"Error during image search process: {e}", exc_info=True)
 
-        images_dir = os.path.join(os.getcwd(), "images")
-        os.makedirs(images_dir, exist_ok=True)
+    return validated_image_paths
 
-        # Try to download the first valid image found
-        for image_info in results["images_results"]:
-            image_url = image_info.get("original")
-            if not image_url:
-                continue
+def process_image_results(image_results, query):
+    """Process and validate image results from either API."""
+    validated_paths = []
+    images_dir = os.path.join(os.getcwd(), "images")
+    os.makedirs(images_dir, exist_ok=True)
 
+    for image_info in image_results:
+        image_url = image_info.get("original")
+        if not image_url:
+            continue
+
+        downloaded_filepath = None
+        try:
             file_extension = os.path.splitext(image_url)[1]
             if not file_extension or file_extension.lower() not in ['.jpg', '.jpeg', '.png', '.gif']:
                 file_extension = '.jpg'
-
-            # Simpler filename for single image
             safe_query = re.sub(r'[^a-zA-Z0-9_]', '', query)[:30]
-            filename = f"{safe_query}{file_extension}"
-            filepath = os.path.join(images_dir, filename)
+            temp_filename = f"temp_{safe_query}_{os.urandom(4).hex()}{file_extension}"
+            filepath = os.path.join(images_dir, temp_filename)
 
-            try:
-                response = requests.get(image_url, timeout=15)
-                response.raise_for_status()
-                with open(filepath, 'wb') as file:
-                    file.write(response.content)
-                try: os.chmod(filepath, 0o666)
-                except OSError: pass
+            logger.info(f"Attempting to download image from URL: {image_url}")
+            response = requests.get(image_url, timeout=20)
+            response.raise_for_status()
+            with open(filepath, 'wb') as file:
+                file.write(response.content)
+            logger.info(f"Successfully downloaded candidate image: {filepath}")
+            downloaded_filepath = filepath
 
-                logger.info(f"Single relevant image downloaded: {filepath}")
-                image_filepaths.append(filepath)
-                break # Stop after successfully downloading the first one
-            except requests.exceptions.RequestException as e:
-                logger.warning(f"Failed to download image from {image_url}: {e}")
-            except IOError as e:
-                logger.warning(f"Failed to write image file {filepath}: {e}")
+            # Validate the downloaded image
+            validated_path = ensure_valid_jpeg(downloaded_filepath)
+            if validated_path:
+                logger.info(f"Image validated successfully: {validated_path}")
+                safe_query = re.sub(r'[^a-zA-Z0-9_]', '', query)[:30]
+                final_filename = f"{safe_query}{os.path.splitext(validated_path)[1]}"
+                final_filepath = os.path.join(images_dir, final_filename)
+                if os.path.exists(final_filepath) and final_filepath != validated_path:
+                    final_filename = f"{safe_query}_{os.urandom(4).hex()}{os.path.splitext(validated_path)[1]}"
+                    final_filepath = os.path.join(images_dir, final_filename)
 
-    except Exception as e:
-        logger.error(f"Error during image search: {e}", exc_info=True)
+                try:
+                    os.rename(validated_path, final_filepath)
+                    logger.info(f"Validated and finalized image: {final_filepath}")
+                    validated_paths.append(final_filepath)
+                    if validated_path != downloaded_filepath and os.path.exists(downloaded_filepath):
+                        try:
+                            os.remove(downloaded_filepath)
+                        except OSError:
+                            pass
+                    break
+                except OSError as e:
+                    logger.warning(f"Could not rename validated image: {e}")
+                    if os.path.exists(validated_path):
+                        try:
+                            os.remove(validated_path)
+                        except OSError:
+                            pass
 
-    return image_filepaths # Return list (empty or with one path)
+        except Exception as e:
+            logger.warning(f"Error processing image: {e}")
+            if downloaded_filepath and os.path.exists(downloaded_filepath):
+                try:
+                    os.remove(downloaded_filepath)
+                except OSError:
+                    pass
+
+    return validated_paths
 
 # Add image validation and conversion function
 def ensure_valid_jpeg(image_path):
@@ -92,7 +161,7 @@ def ensure_valid_jpeg(image_path):
     try:
         # Try to open the image with PIL
         img = Image.open(image_path)
-
+        
         # Check if format is already supported by FPDF (JPG, PNG, GIF)
         if img.format in ('JPEG', 'PNG', 'GIF'):
             logger.info(f"Image {image_path} is already in a supported format ({img.format}).")
@@ -103,30 +172,26 @@ def ensure_valid_jpeg(image_path):
         jpeg_path = os.path.splitext(image_path)[0] + '_converted.jpg'
 
         # Convert to RGB mode if necessary (e.g., for PNG with transparency, GIF)
-        if img.mode in ('RGBA', 'LA', 'P'): # Added 'P' for palette-based like GIF
+        if img.mode in ('RGBA', 'LA', 'P'):
             # Create a white background image
             background = Image.new('RGB', img.size, (255, 255, 255))
             try:
                 # Paste the image onto the background using the alpha channel if available
                 background.paste(img, mask=img.split()[-1] if img.mode in ('RGBA', 'LA') else None)
             except IndexError:
-                 # Handle cases where split doesn't work as expected (e.g., non-alpha palette)
-                 background.paste(img)
+                # Handle cases where split doesn't work as expected (e.g., non-alpha palette)
+                background.paste(img)
             img = background
         else:
-             # Ensure it is RGB before saving as JPEG
-             img = img.convert('RGB')
+            # Ensure it is RGB before saving as JPEG
+            img = img.convert('RGB')
 
         img.save(jpeg_path, 'JPEG', quality=95)
         logger.info(f"Converted image {image_path} to {jpeg_path}")
-        # Clean up original non-jpeg file? Optional.
-        # try: os.remove(image_path) except OSError:
         return jpeg_path
 
     except Exception as e:
         logger.error(f"Error processing image {image_path}: {str(e)}", exc_info=True)
-        # Optionally remove the problematic file
-        # try: os.remove(image_path) except OSError:
         return None
 
 class CustomCrew:
@@ -221,50 +286,45 @@ def create_pdf_file(topic, result_text):
         pdf.add_page()
         line_height = pdf.font_size_pt * 1.25
 
-        # --- Fetch Image Info EARLY --- #
-        logger.info(f"Searching for single image using base term: {document_title}")
-        image_paths = search_unsplash(document_title, num_images=1)
+        # Fetch and Validate Image Info EARLY (Validation now happens IN search_unsplash)
+        logger.info(f"Searching for single validated image using base term: {document_title}")
+        validated_image_paths = search_unsplash(document_title, num_images=1)
         valid_image_path = None
-        if image_paths:
-            temp_valid_path = ensure_valid_jpeg(image_paths[0])
-            if temp_valid_path:
-                valid_image_path = temp_valid_path
-                logger.info(f"Validated image path: {valid_image_path}")
-            else:
-                logger.warning(f"Skipping invalid image: {image_paths[0]}")
+        if validated_image_paths:
+            valid_image_path = validated_image_paths[0]
+            logger.info(f"Using validated image path: {valid_image_path}")
 
-        # --- Write Main Content (Add image after FIRST H2) --- #
+        # Write Main Content (Add image after FIRST H2)
         lines = main_content.split('\n')
         is_first_line = True
         image_added = False
-        first_h2_found = False # Flag to track if the first H2 has been processed
+        first_h2_found = False
 
         for line in lines:
-            # Process the line and write its content FIRST
             stripped_line = line.strip()
             if use_fallback_encoding:
                 processed_line = stripped_line.encode('latin-1', 'replace').decode('latin-1')
             else:
                 processed_line = stripped_line
 
-            is_h2_block = False # Track if the current block is the target H2
+            is_h2_block = False
 
             if not processed_line:
                 if not is_first_line:
                     pdf.ln(line_height * 0.5)
-            elif processed_line.startswith('# '): # H1
+            elif processed_line.startswith('# '):
                 pdf.set_font(family=font_name, style='', size=default_font_size + 5)
                 pdf.ln(line_height * 0.7)
                 pdf.multi_cell(w=pdf.epw, h=line_height, text=processed_line[2:], ln=1, new_x="LMARGIN", new_y="NEXT")
                 pdf.set_font(family=font_name, style='', size=default_font_size)
-            elif processed_line.startswith('## '): # H2
+            elif processed_line.startswith('## '):
                 pdf.set_font(family=font_name, style='', size=default_font_size + 3)
                 pdf.ln(line_height * 0.5)
                 pdf.multi_cell(w=pdf.epw, h=line_height, text=processed_line[3:], ln=1, new_x="LMARGIN", new_y="NEXT")
                 pdf.set_font(family=font_name, style='', size=default_font_size)
-                if not first_h2_found: # Check if this is the first H2
+                if not first_h2_found:
                     is_h2_block = True
-            elif processed_line.startswith('- ') or processed_line.startswith('* '): # Bullet
+            elif processed_line.startswith('- ') or processed_line.startswith('* '):
                 bullet = "\u2022" if not use_fallback_encoding else "*"
                 bullet_point_text = processed_line[2:]
                 full_bullet_line = f"{bullet} {bullet_point_text}"
@@ -275,25 +335,22 @@ def create_pdf_file(topic, result_text):
                 pdf.multi_cell(w=pdf.epw - indent, h=line_height, text=full_bullet_line, ln=1, new_x="LMARGIN", new_y="NEXT")
                 pdf.set_left_margin(original_l_margin)
                 pdf.set_x(original_l_margin)
-            else: # Regular Paragraph
+            else:
                 pdf.set_x(pdf.l_margin)
                 pdf.multi_cell(w=pdf.epw, h=line_height, text=processed_line, ln=1, new_x="LMARGIN", new_y="NEXT")
                 pdf.set_x(pdf.l_margin)
 
-            # Add image AFTER writing the first H2 block
             if is_h2_block and not image_added and valid_image_path:
                 logger.info("Adding image after the first H2 heading.")
                 image_added = _add_image_to_pdf(pdf, valid_image_path)
-                first_h2_found = True # Mark first H2 as processed for image placement
+                first_h2_found = True
 
             is_first_line = False
 
-        # --- Fallback: Add Image at the END if not already added --- #
         if valid_image_path and not image_added:
             logger.info("No H2 found or image failed to add earlier. Adding image at the end.")
             _add_image_to_pdf(pdf, valid_image_path)
 
-        # --- PDF Saving Logic --- #
         pdf_dir = "pdf"
         os.makedirs(pdf_dir, exist_ok=True)
         safe_topic = re.sub(r'[^a-zA-Z0-9_]', '', topic).replace(' ', '_')
@@ -327,7 +384,7 @@ def handle_generate_notes():
         result_text = custom_crew.run()
 
         if not result_text:
-             raise ValueError("CrewAI returned empty result.")
+            raise ValueError("CrewAI returned empty result.")
 
         pdf_relative_path = create_pdf_file(topic, result_text)
 

@@ -25,6 +25,7 @@ dist-ssr/
 __pycache__/
 *.py[cod]
 *$py.class
+*.pyc
 
 # Generated output directories
 pdf/
@@ -52,3 +53,9 @@ Thumbs.db
 
 # Runtime data
 *.local
+
+# IDE specific files
+.vscode/
+.idea/
+*.swp
+*.swo
